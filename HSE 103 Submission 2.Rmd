@@ -1,0 +1,314 @@
+---
+title: "HSE 103 Submission 2"
+author: "Dev Raj"
+output: pdf_document
+---
+
+I used AI to better understand the assignment and correct errors in my R code.
+
+## Introduction
+
+For this project, I analyzed the expression of three genes, CNR1, SOCS5, and SIRT3, across 157 pregnancy samples. I used maternal BMI as my continuous variable and pregnancy status as my first categorical variable. I created a second categorical variable by dividing maternal BMI into two groups, below 25 and 25 or higher. I created an R function to generate a histogram, scatterplot, and grouped boxplot for each gene, giving a total of nine plots. I then compared the gene expression patterns across the three genes.
+
+
+```{r, include=FALSE}
+# Load the three original datasets
+covar <- read.csv("GSE85307_covar-1.csv")
+
+gene_expression <- read.csv(
+  "GSE85307_geneExpression.csv",
+  row.names = 1,
+  check.names = FALSE
+)
+gene_names <- read.csv("GSE85307_geneNames.csv")
+```
+
+```{r, include=FALSE}
+# Convert maternal BMI to numeric
+covar$BMI <- as.numeric(
+  sub(".*: ", "", as.character(covar$mat_BMI))
+)
+
+# Clean pregnancy outcome
+covar$Pregnancy_Status <- factor(
+  sub(".*: ", "", covar$preg_preeclampsia)
+)
+
+# Create BMI categories
+covar$BMI_Category <- factor(
+  ifelse(covar$BMI < 25, "BMI < 25", "BMI >= 25")
+)
+
+```
+
+```{r, include=FALSE}
+# Select the three genes for Submission 2
+selected_genes <- c("CNR1", "SOCS5", "SIRT3")
+
+# Find probe IDs automatically using the gene lookup table
+gene_lookup <- gene_names[
+  gene_names$GENE %in% selected_genes,
+  c("PROBEID", "GENE")
+]
+
+# Confirm that all selected genes have a probe ID
+# in the gene expression dataset
+gene_lookup$Available <- as.character(gene_lookup$PROBEID) %in%
+  rownames(gene_expression)
+
+# Check the results
+gene_lookup
+```
+
+```{r, include=FALSE}
+
+# Create a reusable function to plot multiple genes.
+# The function accepts a data frame, gene names,
+# one continuous variable and two categorical variables.
+
+create_gene_plots <- function(data, genes,
+                              continuous_var,
+                              categorical_vars) {
+
+  # Store the resulting plots in a list.
+  all_plots <- list()
+
+  # Repeat the analysis for every selected gene.
+  for (gene in genes) {
+
+    # Find the probe ID automatically.
+    probe_id <- as.character(
+      gene_names$PROBEID[gene_names$GENE == gene]
+    )
+
+    # Check that the gene has an available probe.
+    probe_id <- probe_id[
+      probe_id %in% rownames(gene_expression)
+    ]
+
+    if (length(probe_id) == 0) {
+      stop(paste("No expression data for", gene))
+    }
+
+    # Match expression values to sample IDs.
+    plot_data <- data
+
+    plot_data$Expression <- as.numeric(
+      gene_expression[probe_id[1], plot_data$geoID]
+    )
+
+    # Create the histogram.
+    histogram <- ggplot(
+      plot_data, aes(x = Expression)
+    ) +
+      geom_histogram(
+        bins = 20,
+        fill = "#4472A0",
+        color = "white"
+      ) +
+      labs(
+        title = paste("Distribution of", gene, "Expression"),
+        x = paste(gene, "Gene Expression"),
+        y = "Number of Samples"
+      ) +
+      theme_classic(base_size = 13)
+
+    # Create the scatterplot.
+    scatterplot <- ggplot(
+      plot_data,
+      aes(x = .data[[continuous_var]], y = Expression)
+    ) +
+      geom_point(color = "#4472A0", alpha = 0.7) +
+      geom_smooth(method = "lm", se = TRUE,
+                  color = "#C0504D") +
+      labs(
+        title = paste(continuous_var, "vs.", gene),
+        x = "Maternal BMI (kg/m²)",
+        y = paste(gene, "Gene Expression")
+      ) +
+      theme_classic(base_size = 13)
+
+    # Create the grouped boxplot.
+    boxplot <- ggplot(
+      plot_data,
+      aes(
+        x = .data[[categorical_vars[1]]],
+        y = Expression,
+        fill = .data[[categorical_vars[2]]]
+      )
+    ) +
+      geom_boxplot(position = position_dodge(0.8)) +
+      scale_fill_manual(
+        values = c("#4472A0", "#E69F00")
+      ) +
+      labs(
+        title = paste(gene, "Expression by Pregnancy Status and BMI"),
+        x = "Pregnancy Status",
+        y = paste(gene, "Gene Expression"),
+        fill = "BMI Category"
+      ) +
+      theme_classic(base_size = 13)
+
+    # Save all three plots for this gene.
+    all_plots[[gene]] <- list(
+      histogram = histogram,
+      scatterplot = scatterplot,
+      boxplot = boxplot
+    )
+  }
+
+  return(all_plots)
+}
+```
+
+```{r, echo=FALSE, message=FALSE, fig.width=6, fig.height=3, out.width='75%', fig.align='center'}
+
+# Generate plots for all three selected genes.
+library(ggplot2)
+
+all_gene_plots <- create_gene_plots(
+  data = covar,
+  genes = selected_genes,
+  continuous_var = "BMI",
+  categorical_vars = c("Pregnancy_Status", "BMI_Category")
+)
+
+# Display the three plots for each gene.
+for (gene in selected_genes) {
+  print(all_gene_plots[[gene]]$histogram)
+  print(all_gene_plots[[gene]]$scatterplot)
+  print(all_gene_plots[[gene]]$boxplot)
+}
+```
+```{r, echo=FALSE}
+
+# Compare gene expression across the three selected genes.
+# Automatically find each gene's probe ID and match samples by geoID.
+
+gene_summary <- data.frame()
+
+for (gene in selected_genes) {
+
+  # Find the probe ID for this gene.
+  probe_id <- as.character(
+    gene_names$PROBEID[gene_names$GENE == gene]
+  )
+
+  # Keep only probes available in the expression dataset.
+  probe_id <- probe_id[
+    probe_id %in% rownames(gene_expression)
+  ]
+
+  # Extract expression values in the correct sample order.
+  expression_values <- as.numeric(
+    gene_expression[probe_id[1], covar$geoID]
+  )
+
+  # Calculate descriptive statistics.
+  gene_summary <- rbind(
+    gene_summary,
+    data.frame(
+      Gene = gene,
+      Mean = mean(expression_values, na.rm = TRUE),
+      Median = median(expression_values, na.rm = TRUE),
+      SD = sd(expression_values, na.rm = TRUE),
+      Minimum = min(expression_values, na.rm = TRUE),
+      Maximum = max(expression_values, na.rm = TRUE)
+    )
+  )
+}
+
+# Display the results rounded to three decimal places.
+gene_summary[, -1] <- round(gene_summary[, -1], 3)
+gene_summary
+```
+
+## Comparison of Gene Expression Across Three Genes
+
+I compared CNR1, SOCS5, and SIRT3 using their mean, median, standard deviation, minimum, and maximum expression values across 157 pregnancy samples.
+
+SIRT3 had the highest average expression value (8.916), followed by SOCS5 (7.474) and CNR1 (4.873).
+
+SOCS5 had the highest standard deviation (0.146), suggesting slightly more variation in its expression values. SIRT3 had the lowest standard deviation (0.123), suggesting slightly less variation.
+
+CNR1 had the largest difference between its minimum and maximum expression values, mainly because a few samples had higher expression values.
+
+Overall, the three genes showed different expression distributions. These results describe expression patterns within the dataset and do not establish biological or statistical significance.
+
+```{r, echo=FALSE}
+
+# Compare the relationship between maternal BMI
+# and gene expression for all three selected genes.
+
+correlation_results <- data.frame()
+
+for (gene in selected_genes) {
+
+  # Automatically find the gene's probe ID.
+  probe_id <- as.character(
+    gene_names$PROBEID[gene_names$GENE == gene]
+  )
+
+  # Select a probe available in the expression dataset.
+  probe_id <- probe_id[
+    probe_id %in% rownames(gene_expression)
+  ][1]
+
+  # Match expression values to the correct samples.
+  expression_values <- as.numeric(
+    gene_expression[probe_id, covar$geoID]
+  )
+
+  # Calculate Pearson correlation with maternal BMI.
+  correlation <- cor(
+    covar$BMI,
+    expression_values,
+    use = "complete.obs",
+    method = "pearson"
+  )
+
+  # Store the result for each gene.
+  correlation_results <- rbind(
+    correlation_results,
+    data.frame(
+      Gene = gene,
+      BMI_Correlation = round(correlation, 3)
+    )
+  )
+}
+
+# Display the results.
+correlation_results
+```
+
+## Comparison of Maternal BMI and Gene Expression
+
+I calculated Pearson correlations to compare the relationship between maternal BMI and the expression of CNR1, SOCS5, and SIRT3 across 157 pregnancy samples.
+
+CNR1 had a correlation of -0.093, showing a very weak negative relationship with maternal BMI. SOCS5 had a correlation of 0.084, showing a very weak positive relationship. SIRT3 had a correlation of -0.039, which was closest to zero.
+
+Overall, all three correlations were very weak. This suggests that maternal BMI had little linear association with the expression of these genes in this dataset. These results do not establish causation or statistical significance.
+
+## Comparison of Gene Expression by Pregnancy Status and BMI
+
+I compared CNR1, SOCS5, and SIRT3 expression across normal pregnancies and pregnancies with preeclampsia. I also compared two BMI categories: below 25 and 25 or higher.
+
+For CNR1, the median expression values were similar across all four groups. The BMI below 25 groups showed slightly higher median expression.
+
+For SOCS5, participants with BMI 25 or higher generally had higher median expression values, especially among those with preeclampsia.
+
+For SIRT3, the median expression values were also similar across the four groups, although the BMI 25 or higher groups showed slightly higher median values.
+
+Overall, all three genes showed overlapping expression distributions across pregnancy status and BMI categories. The observed differences were relatively small, and these plots alone do not establish statistical significance.
+
+## Comparison of Histograms Across Three Genes
+
+I compared the distributions of CNR1, SOCS5, and SIRT3 gene expression across 157 pregnancy samples.
+
+CNR1 had most expression values around 4.8 to 4.9. Its distribution was slightly right-skewed, with a few samples showing higher expression values.
+
+SOCS5 had most expression values around 7.4 to 7.6. Its distribution was more balanced around the center and showed slightly greater variation.
+
+SIRT3 had most expression values around 8.8 to 9.0. Its distribution was more concentrated around the center, with a few values at either end.
+
+Overall, the three genes showed different expression distributions. SOCS5 had the largest standard deviation (0.146), while SIRT3 had the smallest (0.123).
